@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 /**
  * LEGACY BILLING ENGINE
@@ -70,36 +71,16 @@ public class OrderBillingEngine {
 
         // 3. Payment Processing (Violates Open/Closed Principle)
         String paymentMethod = (String) orderData.getOrDefault("paymentMethod", "CASH");
-        String paymentStatus = "FAILED";
-
-        if (paymentMethod.equals("CREDIT_CARD")) {
-            String cardNumber = (String) orderData.getOrDefault("cardNumber", "");
-            if (cardNumber.length() == 16 && cardNumber.matches("\\d+")) {
-                System.out.println("Processing credit card payment of PKR " + payableAmount);
-                paymentStatus = "PAID";
-            } else {
-                System.out.println("Card declined: Must be 16 digits.");
-                return false;
-            }
-        } else if (paymentMethod.equals("EASYPAISA")) {
-            String mobileNo = (String) orderData.getOrDefault("mobileNumber", "");
-            if (mobileNo.length() == 11 && mobileNo.startsWith("03")) {
-                System.out.println("Sending EasyPaisa OTP push to " + mobileNo + " for PKR " + payableAmount);
-                paymentStatus = "PAID";
-            } else {
-                System.out.println("EasyPaisa failed: Invalid mobile number.");
-                return false;
-            }
-        } else if (paymentMethod.equals("CASH_ON_DELIVERY")) {
-            if (payableAmount > 25000) {
-                System.out.println("Cash on delivery not allowed for orders above PKR 25,000.");
-                return false;
-            }
-            paymentStatus = "PENDING_CASH";
-        } else {
+               PaymentStrategy strategy = paymentStrategies.get(paymentMethod);
+        if (strategy == null) {
             System.out.println("Error: Unsupported payment method: " + paymentMethod);
             return false;
         }
+        if (!strategy.validate(orderData, payableAmount)) {
+            System.out.println("Payment rejected for method: " + paymentMethod);
+            return false;
+        }
+        String paymentStatus = strategy.status();
 
         // 4. Direct File Saving (Side-effect inside business logic)
         try (FileWriter writer = new FileWriter(logFilePath, true)) {
@@ -134,4 +115,11 @@ public class OrderBillingEngine {
     
     private final TaxCalculator taxCalculator = new TaxCalculator();
     private final DiscountCalculator discountCalculator = new DiscountCalculator();
+        private final Map<String, PaymentStrategy> paymentStrategies = new HashMap<>();
+
+    public OrderBillingEngine() {
+        paymentStrategies.put("CREDIT_CARD", new CreditCardPayment());
+        paymentStrategies.put("EASYPAISA", new EasyPaisaPayment());
+        paymentStrategies.put("CASH_ON_DELIVERY", new CashOnDeliveryPayment());
+    }
 }
